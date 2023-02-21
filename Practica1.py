@@ -9,16 +9,12 @@ NPROD = 3
 NCONS = 3
 
 def add_data(storage, index, pid, data, mutex):
-    mutex.acquire()
-    try:
+    with mutex:
         storage[index.value] = data
         index.value = index.value + 1
-    finally:
-        mutex.release()
 
 def get_data(storage, index, mutex):
-    mutex.acquire()
-    try:
+    with mutex:
         dato, mi = storage[0], 0
         for i in range(index.value):
             if dato > storage[i]:
@@ -26,8 +22,6 @@ def get_data(storage, index, mutex):
         index.value = index.value - 1
         storage[mi] = storage[index.value]
         storage[index.value] = -1
-    finally:
-        mutex.release()
     return dato
 
 
@@ -37,8 +31,7 @@ def producer(storage, index, empty, non_empty, mutex):
         print (f"producer {current_process().name} produciendo")
         dato += round(random()*30)
         empty.acquire()
-        add_data(storage, index, int(current_process().name.split('_')[1]),
-                 dato, mutex)
+        add_data(storage, index, int(current_process().name.split('_')[1]), dato, mutex)
         non_empty.release()
         print (f"producer {current_process().name} almacenado {dato}")
 
@@ -53,15 +46,12 @@ def consumer(storage, almacen, index, empty, non_empty, mutex, mutex2):
         merge(almacen, dato, mutex2)
             
 def merge(almacen, dato, mutex2):
-    mutex2.acquire()
-    try:
+    with mutex2:
         lista = busqBinaria(almacen, dato)
         l = len(almacen)
         for i in range(l):
             almacen[i] = lista[i]
         almacen.append(lista[l])
-    finally:
-        mutex2.release()
 
 def busqBinaria(lista, dato):
     l = len(lista)
