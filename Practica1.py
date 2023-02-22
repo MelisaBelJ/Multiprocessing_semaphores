@@ -1,100 +1,99 @@
 from multiprocessing import Process, Manager, BoundedSemaphore, Semaphore, Lock, current_process, Value, Array
-from time import sleep
 from random import random
 
+class practica1():
+	def __init__(self, N, K, NPROD, NCONS):
+		self.K	 = K
+		self.N	 = N
+		self.NPROD = NPROD
+		self.NCONS = NCONS
+		
+		self.manager = Manager()
+		self.almacen = self.manager.list()
+		self.storage = Array('i', self.K)
+		self.index   = Value('i', 0)
+		for i in range(K):
+			self.storage[i] = -1
 
-N = 100
-K = 10
-NPROD = 3
-NCONS = 3
+		self.non_empty = Semaphore(0)
+		self.empty	   = BoundedSemaphore(self.K)
+		self.mutex	   = Lock()
+		self.mutex2	   = Lock()
 
-def add_data(storage, index, pid, data, mutex):
-    with mutex:
-        storage[index.value] = data
-        index.value = index.value + 1
+	def addDato(self, dato):
+		with self.mutex:
+			self.storage[self.index.value] = dato
+			self.index.value += 1
 
-def get_data(storage, index, mutex):
-    with mutex:
-        dato, mi = storage[0], 0
-        for i in range(index.value):
-            if dato > storage[i]:
-                mi, dato = i, storage[i]
-        index.value = index.value - 1
-        storage[mi] = storage[index.value]
-        storage[index.value] = -1
-    return dato
+	def getDato(self):
+		with self.mutex:
+			dato, mi = self.storage[0], 0
+			for i in range(self.index.value):
+				if dato > self.storage[i]:
+					mi, dato = i, self.storage[i]
+			self.index.value -= 1
+			self.storage[mi] = self.storage[self.index.value]
+			self.storage[self.index.value] = -1
+		return dato
+				
+	def merge(self, dato):
+		with self.mutex2:
+			lista = practica1.busqBinaria(self.almacen, dato)
+			l = len(self.almacen)
+			for i in range(l):
+				self.almacen[i] = lista[i]
+			self.almacen.append(lista[l])
+
+	def busqBinaria(lista, dato):
+		listaReturn, l = [], len(lista)
+		if l == 0:
+			listaReturn = [dato]
+		elif l == 1:
+			listaReturn = (
+			lista + [dato] if dato > lista[l//2] 
+			else [dato] + lista)
+		else:
+			listaReturn = (
+			lista[0:l//2] + practica1.busqBinaria(lista[l//2:l], dato) if dato > lista[l//2] 
+			else practica1.busqBinaria(lista[0:l//2], dato) + lista[l//2:l])
+		return listaReturn
+
+	def producer(self):
+		dato = 0
+		for v in range(self.N):
+			print (f"producer {current_process().name} produciendo")
+			dato += round(random()*30)
+			self.empty.acquire()
+			self.addDato(dato)
+			self.non_empty.release()
+			print (f"producer {current_process().name} almacenado {dato}")
 
 
-def producer(storage, index, empty, non_empty, mutex):
-    dato = 0
-    for v in range(N):
-        print (f"producer {current_process().name} produciendo")
-        dato += round(random()*30)
-        empty.acquire()
-        add_data(storage, index, int(current_process().name.split('_')[1]), dato, mutex)
-        non_empty.release()
-        print (f"producer {current_process().name} almacenado {dato}")
+	def consumer(self):
+		for v in range(self.N):
+			self.non_empty.acquire()
+			print (f"consumer {current_process().name} desalmacenando")
+			dato = self.getDato()
+			self.empty.release()
+			print (f"consumer {current_process().name} consumiendo {dato}")
+			self.merge(dato)
 
+	def main(self):
+		prodlst = [ Process(target=self.producer, name=f'prod_{i}', args=())
+					for i in range(self.NPROD) ]
 
-def consumer(storage, almacen, index, empty, non_empty, mutex, mutex2):
-    for v in range(N):
-        non_empty.acquire()
-        print (f"consumer {current_process().name} desalmacenando")
-        dato = get_data(storage, index, mutex)
-        empty.release()
-        print (f"consumer {current_process().name} consumiendo {dato}")
-        merge(almacen, dato, mutex2)
-            
-def merge(almacen, dato, mutex2):
-    with mutex2:
-        lista = busqBinaria(almacen, dato)
-        l = len(almacen)
-        for i in range(l):
-            almacen[i] = lista[i]
-        almacen.append(lista[l])
+		conslst = [ Process(target=self.consumer, name=f"cons_{i}", args=())
+					for i in range(self.NCONS) ]
 
-def busqBinaria(lista, dato):
-    l = len(lista)
-    if l == 0:
-        return [dato]
-    elif l == 1:
-        if dato > lista[l//2]:
-            return lista + [dato]
-        else:
-            return [dato] + lista
-    else:
-        if dato > lista[l//2]:
-            return lista[0:l//2] + busqBinaria(lista[l//2:l], dato)
-        else:
-            return busqBinaria(lista[0:l//2], dato) + lista[l//2:l] 
+		for p in prodlst + conslst:
+			p.start()
 
-def main():
-    manager = Manager()
-    almacen = manager.list()
-    storage = Array('i', K)
-    index   = Value('i', 0)
-    for i in range(K):
-        storage[i] = -1
-
-    non_empty = Semaphore(0)
-    empty     = BoundedSemaphore(K)
-    mutex     = Lock()
-    mutex2    = Lock()
-
-    prodlst = [ Process(target=producer, name=f'prod_{i}', args=(storage, index, empty, non_empty, mutex))
-                for i in range(NPROD) ]
-
-    conslst = [ Process(target=consumer, name=f"cons_{i}", args=(storage, almacen, index, empty, non_empty, mutex, mutex2))
-                for i in range(NCONS) ]
-
-    for p in prodlst + conslst:
-        p.start()
-
-    for p in prodlst + conslst:
-        p.join()
-        
-    print ("almacen final", almacen[:])
+		for p in prodlst + conslst:
+			p.join()
+			
+		print (f"Almacen: {self.almacen[:]}" if len(self.almacen[:]) == self.NPROD*self.N else "Error")
 
 
 if __name__ == '__main__':
-    main()
+	p1 = practica1(100, 10, 3, 3)
+	p1.main()
