@@ -14,22 +14,21 @@ class practica1():
 		for i in range(NPROD):
 			self.storage[i] = -2
 		self.colas      = [Array('i', K) for i in range(NPROD)] #Colas de los productores, para almacenar el resto de productos (a parte del visible para el consumidor)
-		self.index      = [Value('i', 0) for i in range(NPROD)] #Posición de la lista que usamos de cola por la que termina para cada productor
-		self.indexLectra= [Value('i', 0) for i in range(NPROD)] #Posición de la lista que usamos de cola por la que empieza para cada productor
+		self.index      = [Value('i', 0) for i in range(NPROD)] #Posición de la lista que usamos de cola por la que va almacenando cada productor
+		self.indexLee   = [Value('i', 0) for i in range(NPROD)] #Posición de la lista que usamos de cola por la que va leyendo cada productor
 		self.occStorage = Value('i', 0) #Cantidad de posiciones del storage ocupadas
 
 		self.empty	        = [BoundedSemaphore(K) for i in range(NPROD)] #Semaforo para controlar que los productores no hagan más de lo que cabe en la cola
-		self.colaEnUso	        = [BoundedSemaphore(1) for i in range(NPROD)] #Semaforo para controlar que los productores no cambien la cola al mismo tiempo que el consumidor
+		self.colaEnUso	    = [BoundedSemaphore(1) for i in range(NPROD)] #Semaforo para controlar que los productores no cambien la cola al mismo tiempo que el consumidor
 		self.storageLibre   = Lock() #Lock para controlar que el storage no está siendo usado por otros procesos
 		self.storageNoVacio = Lock() #Lock para controlar que el consumidor no empiece a consumir hasta que el storage esté ocupado
 		self.storageNoVacio.acquire() #El storage empieza vacío por lo que bloqueamos el Lock para que el consumidor espera a que se llene
 		
-	#Coloca dato de pid en el storage
-	def cambiaStorage(self, i, dato, pid):
-		self.colas[pid][i] = dato #Añadimos el dato a la cola
-		with self.storageLibre: #No permitimos que se cambie el storage al mismo tiempo
+	#Comprueba si hay un dato en la cola de pid para meter en storage
+	def cambiaStorage(self, pid):
+		with self.storageLibre:
 			if self.storage[pid] == -2:
-				self.storage[pid] = self.colas[pid][self.indexLectura[pid]]
+				self.storage[pid] = self.colas[pid][self.indexLee[pid].value]
 				self.occStorage.value += 1
 				if self.occStorage.value == self.NPROD:
 					print("Listos para ser consumidos")
@@ -38,27 +37,28 @@ class practica1():
 	#Añade dato a la cola pid
 	def addDato(self, dato, pid):
 		self.empty[pid].acquire() #Comprobamos que no está llena la cola
-		with self.colaEnUso[pid]:		
-			self.cambiaStorage(self.index[pid].value, dato, pid)
+		with self.colaEnUso[pid]: #Comprobamos que el consumidor no está usando la cola
+			self.colas[pid][self.index[pid].value] = dato #Añadimos el dato a la cola
+			self.cambiaStorage(pid)
 			self.index[pid].value += 1
-			if self.index[pid].value == self.K:
+			if self.index[pid].value >= self.K:
 				self.index[pid].value = 0
 
 	#Devuelve el primer dato de la cola pid
 	def getDato(self, pid):
-		with self.colaEnUso[pid]:
-			dato = self.colas[pid][0] 
-			with self.storageLibre:
-				self.occStorage.value -= 1
-				self.storage[pid] = -2
-			self.indexLectra[pid] += 1			
-			if self.indexLectra[pid].value == self.K:
-				self.indexLectra[pid].value = 0
+		with self.colaEnUso[pid]: #Comprobamos que el productor no está usando la cola
+			dato = self.colas[pid][self.indexLee[pid].value] 
+			self.occStorage.value -= 1
+			self.indexLee[pid].value += 1
+			if self.indexLee[pid].value >= self.K:
+				self.indexLee[pid].value = 0
+			self.storage[pid] = -2
+			self.cambiaStorage(pid)
 		self.empty[pid].release()
 		return dato
 				
 	#Añade el menor de los datos del storage al almacen
-	def merge(self): #No necesitamos un lock para el storage porque una vez se ha llenado, solo lo utiliza el consumidor
+	def merge(self):
 		dato, mi = self.storage[0], 0 #Buscamos el mínimo de storage (No cogemos el lock de storage, por que por la forma en que está definido, una vez se ha llenado no lo van a modificar otros)
 		for p in range(1, self.NPROD):
 			if self.storage[p] != -1 and (dato == -1 or dato >= self.storage[p]): #Ignoramos los productores que ya han terminado de producir y nos quedamos con el menor dato
@@ -72,7 +72,7 @@ class practica1():
 		pid = int(current_process().name)
 		for v in range(self.N):
 			print (f"producer {pid} produciendo")
-			dato += round(random()*10+1)
+			dato += round(random()*10)
 			self.addDato(dato, pid) 
 			print (f"producer {pid} almacenado {dato}")
 		self.addDato(-1, pid) #Para indicar que ha terminado produce un -1, que no se debe almacenar
@@ -98,105 +98,8 @@ class practica1():
 			
 		print (f"Almacen: {self.almacen[:]}" if len(self.almacen[:]) == self.NPROD*self.N else "Error") #Mostramos el almacén o un mensaje de error si le faltan datos
 
-class practica1_VariosConsumidores():
-	def __init__(self, N, K, NPROD, NCONS):
-		self.K	 = K
-		self.N	 = N
-		self.NPROD = NPROD
-		self.NCONS = NCONS
-		
-		self.manager = Manager()
-		self.almacen = self.manager.list()
-		self.storage = Array('i', self.K)
-		self.index   = Value('i', 0)
-		for i in range(K):
-			self.storage[i] = -1
-
-		self.non_empty = Semaphore(0)
-		self.empty	   = BoundedSemaphore(self.K)
-		self.mutex	   = Lock()
-		self.mutex2	   = Lock()
-
-	def addDato(self, dato):
-		with self.mutex:
-			self.storage[self.index.value] = dato
-			self.index.value += 1
-
-	def getDato(self):
-		with self.mutex:
-			dato, mi = self.storage[0], 0
-			for i in range(self.index.value):
-				if dato > self.storage[i]:
-					mi, dato = i, self.storage[i]
-			self.index.value -= 1
-			self.storage[mi] = self.storage[self.index.value]
-			self.storage[self.index.value] = -1
-		return dato
-				
-	def merge(self, dato):
-		with self.mutex2:
-			lista = practica1_VariosConsumidores.busqBinaria(self.almacen, dato)
-			l = len(self.almacen)
-			for i in range(l):
-				self.almacen[i] = lista[i]
-			self.almacen.append(lista[l])
-
-	def busqBinaria(lista, dato):
-		listaReturn, l = [], len(lista)
-		if l == 0:
-			listaReturn = [dato]
-		elif l == 1:
-			listaReturn = (
-			lista + [dato] if dato > lista[l//2] 
-			else [dato] + lista)
-		else:
-			listaReturn = (
-			lista[0:l//2] + practica1_VariosConsumidores.busqBinaria(lista[l//2:l], dato) if dato > lista[l//2] 
-			else practica1_VariosConsumidores.busqBinaria(lista[0:l//2], dato) + lista[l//2:l])
-		return listaReturn
-
-	def producer(self):
-		dato = 0
-		for v in range(self.N):
-			print (f"producer {current_process().name} produciendo")
-			dato += round(random()*30)
-			self.empty.acquire()
-			self.addDato(dato)
-			self.non_empty.release()
-			print (f"producer {current_process().name} almacenado {dato}")
-
-
-	def consumer(self):
-		for v in range(self.N):
-			self.non_empty.acquire()
-			print (f"consumer {current_process().name} desalmacenando")
-			dato = self.getDato()
-			self.empty.release()
-			print (f"consumer {current_process().name} consumiendo {dato}")
-			self.merge(dato)
-
-	def main(self):
-		prodlst = [ Process(target=self.producer, name=f'prod_{i}', args=())
-					for i in range(self.NPROD) ]
-
-		conslst = [ Process(target=self.consumer, name=f"cons_{i}", args=())
-					for i in range(self.NCONS) ]
-
-		for p in prodlst + conslst:
-			p.start()
-
-		for p in prodlst + conslst:
-			p.join()
-			
-		print (f"Almacen: {self.almacen[:]}" if len(self.almacen[:]) == self.NPROD*self.N else "Error")
-
 if __name__ == '__main__':
-#Tenemos 3 productores, cada uno crea 100 datos y tiene una cola de tamaño 10. Con 1 solo consumidor.
-	N, K, NPROD, NCONS = 10, 10, 3, 1
-	if NCONS == 1:
-		p1 = practica1(NPROD, N, K) 
-	elif NCONS >1:
-		p1 = practica1_VariosConsumidores(N, K, NPROD, NCONS)
-	else:
-		raise TypeError("El número de consumidores no puede ser negativo")
+#Tenemos 3 productores, cada uno crea 1000 datos y tiene una cola de tamaño 10. 1 consumidor.
+	N, K, NPROD = 1000, 10, 3
+	p1 = practica1(NPROD, N, K) 
 	p1.main() #Iniciamos los procesos
