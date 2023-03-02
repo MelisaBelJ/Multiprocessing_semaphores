@@ -16,6 +16,7 @@ class practica1():
 		self.occStorage = Value('i', 0) #Cantidad de posiciones del storage ocupadas
 
 		self.empty	        = [BoundedSemaphore(K) for i in range(NPROD)] #Semaforo para controlar que los productores no hagan más de lo que cabe en la cola
+		self.colaEnUso	    = [BoundedSemaphore(1) for i in range(NPROD)] #Semaforo para controlar que los productores no cambien la cola al mismo tiempo que el consumidor
 		self.storageLibre   = Lock() #Lock para controlar que el storage no está siendo usado por otros procesos
 		self.storageNoVacio = Lock() #Lock para controlar que el consumidor no empiece a consumir hasta que el storage esté ocupado
 		self.storageNoVacio.acquire() #El storage empieza vacío por lo que bloqueamos el Lock para que el consumidor espera a que se llene
@@ -34,16 +35,18 @@ class practica1():
 	#Añade dato a la cola pid
 	def addDato(self, dato, pid):
 		self.empty[pid].acquire() #Comprobamos que no está llena la cola
-		self.cambiaCola(self.index[pid].value, dato, pid)
-		self.index[pid].value += 1
+		with self.colaEnUso[pid]: #Comprobamos que el consumidor no está usando la cola
+			self.cambiaCola(self.index[pid].value, dato, pid)
+			self.index[pid].value += 1
 
 	#Devuelve el primer dato de la cola pid
 	def getDato(self, pid):
-		dato = self.colas[pid][0] 
-		self.occStorage.value -= 1
-		self.index[pid].value -= 1
-		for i in range(self.index[pid].value): #Desplazamos la cola una posición
-			self.cambiaCola(i, self.colas[pid][i+1], pid)
+		with self.colaEnUso[pid]: #Comprobamos que el productor no está usando la cola
+			dato = self.colas[pid][0] 
+			self.occStorage.value -= 1
+			self.index[pid].value -= 1
+			for i in range(self.index[pid].value): #Desplazamos la cola una posición
+				self.cambiaCola(i, self.colas[pid][i+1], pid)
 		self.empty[pid].release()
 		return dato
 				
@@ -62,7 +65,7 @@ class practica1():
 		pid = int(current_process().name)
 		for v in range(self.N):
 			print (f"producer {pid} produciendo")
-			dato += round(random()*30)
+			dato += round(random()*10)
 			self.addDato(dato, pid) 
 			print (f"producer {pid} almacenado {dato}")
 		self.addDato(-1, pid) #Para indicar que ha terminado produce un -1, que no se debe almacenar
@@ -181,8 +184,8 @@ class practica1_VariosConsumidores():
 		print (f"Almacen: {self.almacen[:]}" if len(self.almacen[:]) == self.NPROD*self.N else "Error")
 
 if __name__ == '__main__':
-#Tenemos 3 productores, cada uno crea 100 datos y tiene una cola de tamaño 10
-	N, K, NPROD, NCONS = 100, 10, 3, 1
+#Tenemos 3 productores, cada uno crea 1000 datos y tiene una cola de tamaño 10. 1 consumidor.
+	N, K, NPROD, NCONS = 1000, 10, 3, 1
 	if NCONS == 1:
 		p1 = practica1(NPROD, N, K) 
 	elif NCONS >1:
