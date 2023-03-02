@@ -29,7 +29,7 @@ class practica1():
 		self.colas[pid][i] = dato #Añadimos el dato a la cola
 		with self.storageLibre: #No permitimos que se cambie el storage al mismo tiempo
 			if self.storage[pid] == -2:
-				self.storage[pid] = dato
+				self.storage[pid] = self.colas[pid][self.indexLectura[pid]]
 				self.occStorage.value += 1
 				if self.occStorage.value == self.NPROD:
 					print("Listos para ser consumidos")
