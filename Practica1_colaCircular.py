@@ -18,7 +18,8 @@ class practica1():
 		self.indexLee   = [Value('i', 0) for i in range(NPROD)] #Posición de la lista que usamos de cola por la que va leyendo cada productor
 		self.occStorage = Value('i', 0) #Cantidad de posiciones del storage ocupadas
 
-		self.empty	        = [BoundedSemaphore(K) for i in range(NPROD)] #Semaforo para controlar que los productores no hagan más de lo que cabe en la cola
+		#Necesitamos 2 semáforos por productor: 1 que su cola no se llena demasiado y otro para evitar que la cola se modifique mientras la están usando.
+		self.empty          = [BoundedSemaphore(K) for i in range(NPROD)] #Semaforo para controlar que los productores no hagan más de lo que cabe en la cola
 		self.colaEnUso	    = [BoundedSemaphore(1) for i in range(NPROD)] #Semaforo para controlar que los productores no cambien la cola al mismo tiempo que el consumidor
 		self.storageLibre   = Lock() #Lock para controlar que el storage no está siendo usado por otros procesos
 		self.storageNoVacio = Lock() #Lock para controlar que el consumidor no empiece a consumir hasta que el storage esté ocupado
